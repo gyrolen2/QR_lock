@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Offline Codec2 & QR PWA Engine</title>
+    <title>Offline ADPCM Voice & QR PWA Engine</title>
     <style>
         :root { --primary: #007bff; --success: #28a745; --danger: #dc3545; --bg: #f4f4f4; }
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 15px; background: var(--bg); color: #333; }
@@ -42,7 +42,7 @@
 
 <div class="container">
 
-    <!-- Global Configuration Section (Half-Width Grid Layout) -->
+    <!-- Global Configuration Section -->
     <div class="card">
         <h2>Global Settings & Metadata Options</h2>
         
@@ -91,15 +91,15 @@
 
             <!-- Audio Input Sub-Section -->
             <div id="audioInputArea" style="display:none;">
-                <label for="qualitySelect">Codec2 Quality Profile:</label>
+                <label for="qualitySelect">Voice Quality Profile:</label>
                 <select id="qualitySelect">
-                    <option value="3200">High Quality (3200 bps) — Max ~5 sec</option>
-                    <option value="2400">Balanced (2400 bps) — Max ~6.6 sec</option>
-                    <option value="1300" selected>Max Duration (1300 bps) — Max ~12 sec</option>
+                    <option value="4000" selected>4 kHz Speech (2000 B/s) — Best QR Scannability</option>
+                    <option value="6000">6 kHz Speech (3000 B/s) — Balanced Clarity</option>
+                    <option value="8000">8 kHz Speech (4000 B/s) — High Clarity</option>
                 </select>
 
                 <button id="recordBtn" onclick="toggleRecording()">Start Recording Voice</button>
-                <button id="playBtn" onclick="playCompressedAudio()" disabled class="btn-success">Play Codec2 Audio Preview</button>
+                <button id="playBtn" onclick="playCompressedAudio()" disabled class="btn-success">Play Voice Preview</button>
                 <div id="sizeCounter" class="counter" style="margin-top:10px;">Payload Status: No audio recorded.</div>
             </div>
 
@@ -123,7 +123,7 @@
             <div id="scanStatus" class="counter" style="margin-top:10px;">Camera idle. Tap button to start scanning.</div>
         </div>
 
-        <!-- Password Prompt Dialog (Only shown if QR payload is encrypted) -->
+        <!-- Password Prompt Dialog -->
         <div class="card" id="passwordPromptCard" style="display:none; border: 2px solid var(--primary);">
             <h2>Locked Payload</h2>
             <p style="margin: 0 0 10px 0; font-size:14px;">This QR payload is encrypted with AES-256. Enter password to view content:</p>
@@ -142,7 +142,7 @@
             </div>
 
             <div id="decodedAudioContainer" style="display:none;">
-                <label>Decoded Codec2 Voice Stream:</label>
+                <label>Decoded Voice Stream:</label>
                 <button class="btn-success" onclick="playDecodedAudio()">Play Decoded Audio</button>
             </div>
         </div>
@@ -162,18 +162,14 @@
     let recordingStartTime = 0;
     let activeInputMode = 'text';
     let qr = null;
+    let hardwareSampleRate = 48000;
     
     // Scanner State
     let scanStream = null;
     let scanAnimationFrameId = null;
     let lastScannedRawData = null;
     let decodedAudioDataBuffer = null;
-
-    const profiles = {
-        3200: { bytesPerSec: 400, artifacts: 0.02 },
-        2400: { bytesPerSec: 300, artifacts: 0.05 },
-        1300: { bytesPerSec: 162.5, artifacts: 0.12 }
-    };
+    let decodedSampleRate = 4000;
 
     // --- Core Helper & GPS Functions ---
     function getDefaultProjectName() {
@@ -238,7 +234,128 @@
         }
     }
 
-    // --- Audio Recording Engine (Mobile Optimized) ---
+    // --- Anti-Alias Audio Resampler (Hardware Rate -> Target Rate) ---
+    function resampleAudio(float32Array, inSampleRate, outSampleRate) {
+        if (inSampleRate === outSampleRate) return float32Array;
+        let ratio = inSampleRate / outSampleRate;
+        let newLength = Math.round(float32Array.length / ratio);
+        let result = new Float32Array(newLength);
+        
+        for (let i = 0; i < newLength; i++) {
+            let center = i * ratio;
+            let start = Math.floor(center - ratio / 2);
+            let end = Math.ceil(center + ratio / 2);
+            start = Math.max(0, start);
+            end = Math.min(float32Array.length, end);
+            
+            let sum = 0;
+            let count = 0;
+            for (let j = start; j < end; j++) {
+                sum += float32Array[j];
+                count++;
+            }
+            result[i] = count > 0 ? sum / count : 0;
+        }
+        return result;
+    }
+
+    // --- IMA ADPCM Speech Codec (4-bit per sample) ---
+    const StepTable = [
+        7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45,
+        50, 55, 60, 66, 73, 80, 88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230,
+        253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658, 724, 796, 876, 963,
+        1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024, 3326,
+        3659, 4025, 4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487,
+        12635, 13899, 15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767
+    ];
+    const IndexTable = [-1, -1, -1, -1, 2, 4, 6, 8, -1, -1, -1, -1, 2, 4, 6, 8];
+
+    function encodeIMAADPCM(pcm16) {
+        let valpred = 0;
+        let index = 0;
+        let out = new Uint8Array(Math.ceil(pcm16.length / 2));
+        let outIdx = 0;
+        let buffer = 0;
+        let bufferstep = false;
+
+        for (let i = 0; i < pcm16.length; i++) {
+            let sample = pcm16[i];
+            let step = StepTable[index];
+            let diff = sample - valpred;
+            let sign = (diff < 0) ? 8 : 0;
+            if (sign) diff = -diff;
+
+            let delta = 0;
+            let vpdiff = (step >> 3);
+
+            if (diff >= step) { delta |= 4; diff -= step; vpdiff += step; }
+            step >>= 1;
+            if (diff >= step) { delta |= 2; diff -= step; vpdiff += step; }
+            step >>= 1;
+            if (diff >= step) { delta |= 1; vpdiff += step; }
+
+            if (sign) valpred -= vpdiff;
+            else valpred += vpdiff;
+
+            if (valpred > 32767) valpred = 32767;
+            else if (valpred < -32768) valpred = -32768;
+
+            index += IndexTable[delta | sign];
+            if (index < 0) index = 0;
+            if (index > 88) index = 88;
+
+            let nibble = delta | sign;
+
+            if (bufferstep) {
+                out[outIdx++] = (nibble << 4) | buffer;
+                bufferstep = false;
+            } else {
+                buffer = nibble;
+                bufferstep = true;
+            }
+        }
+        if (bufferstep) out[outIdx] = buffer;
+        return out;
+    }
+
+    function decodeIMAADPCM(adpcmUint8, totalSamples) {
+        let valpred = 0;
+        let index = 0;
+        let pcm = new Float32Array(totalSamples);
+        let pcmIdx = 0;
+
+        for (let i = 0; i < adpcmUint8.length && pcmIdx < totalSamples; i++) {
+            let byte = adpcmUint8[i];
+            let nibbles = [byte & 0x0F, (byte >> 4) & 0x0F];
+
+            for (let n = 0; n < 2 && pcmIdx < totalSamples; n++) {
+                let delta = nibbles[n];
+                let step = StepTable[index];
+                let sign = delta & 8;
+                let deltaCode = delta & 7;
+
+                let vpdiff = (step >> 3);
+                if (deltaCode & 4) vpdiff += step;
+                if (deltaCode & 2) vpdiff += (step >> 1);
+                if (deltaCode & 1) vpdiff += (step >> 2);
+
+                if (sign) valpred -= vpdiff;
+                else valpred += vpdiff;
+
+                if (valpred > 32767) valpred = 32767;
+                else if (valpred < -32768) valpred = -32768;
+
+                index += IndexTable[delta];
+                if (index < 0) index = 0;
+                if (index > 88) index = 88;
+
+                pcm[pcmIdx++] = valpred / 32768.0;
+            }
+        }
+        return pcm;
+    }
+
+    // --- Recording Engine ---
     async function toggleRecording() {
         let btn = document.getElementById('recordBtn');
         let playBtn = document.getElementById('playBtn');
@@ -247,16 +364,12 @@
             try {
                 recordedChunks = [];
                 mediaStream = await navigator.mediaDevices.getUserMedia({ 
-                    audio: { 
-                        echoCancellation: true, 
-                        noiseSuppression: false, 
-                        autoGainControl: true 
-                    } 
+                    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } 
                 });
 
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                hardwareSampleRate = audioCtx.sampleRate;
                 
-                // Force-resume AudioContext for iOS Safari and Android Chrome
                 if (audioCtx.state === 'suspended') {
                     await audioCtx.resume();
                 }
@@ -291,13 +404,11 @@
             btn.innerText = 'Start Recording Voice';
             btn.className = '';
 
-            if (audioCtx) {
-                await audioCtx.close();
-            }
+            if (audioCtx) await audioCtx.close();
 
             let totalSamples = recordedChunks.reduce((acc, chunk) => acc + chunk.length, 0);
             if (totalSamples > 0) {
-                let compressed = compressAudioToCodec2Payload();
+                let compressed = compressAudioToADPCMPayload();
                 document.getElementById('sizeCounter').innerText = 
                     `Duration: ${recordingDurationSec.toFixed(2)}s | Payload Size: ~${compressed.byteCount} bytes`;
                 playBtn.disabled = false;
@@ -305,71 +416,60 @@
         }
     }
 
-    function compressAudioToCodec2Payload() {
-        if (!recordedChunks || recordedChunks.length === 0) return { base64Audio: "", duration: 0, byteCount: 0 };
+    function compressAudioToADPCMPayload() {
+        if (!recordedChunks || recordedChunks.length === 0) return { base64Audio: "", duration: 0, byteCount: 0, targetRate: 4000 };
 
         let totalLength = recordedChunks.reduce((acc, chunk) => acc + chunk.length, 0);
-        let rawArray = new Float32Array(totalLength);
+        let raw48k = new Float32Array(totalLength);
         let offset = 0;
         for (let chunk of recordedChunks) {
-            rawArray.set(chunk, offset);
+            raw48k.set(chunk, offset);
             offset += chunk.length;
         }
 
-        let selectedBitrateKey = document.getElementById('qualitySelect').value;
-        let profile = profiles[selectedBitrateKey];
-        
-        let totalCompressedBytes = Math.floor(recordingDurationSec * profile.bytesPerSec);
-        let compressedUint8 = new Uint8Array(totalCompressedBytes);
+        let targetRate = parseInt(document.getElementById('qualitySelect').value);
+        let resampled = resampleAudio(raw48k, hardwareSampleRate, targetRate);
 
-        let step = rawArray.length / totalCompressedBytes;
-        for (let i = 0; i < totalCompressedBytes; i++) {
-            let sampleIdx = Math.floor(i * step);
-            let val = rawArray[sampleIdx] || 0;
-            compressedUint8[i] = Math.floor((Math.max(-1, Math.min(1, val)) + 1) * 127.5);
+        let pcm16 = new Int16Array(resampled.length);
+        for (let i = 0; i < resampled.length; i++) {
+            let s = Math.max(-1, Math.min(1, resampled[i]));
+            pcm16[i] = s < 0 ? s * 32768 : s * 32767;
         }
 
+        let adpcmBytes = encodeIMAADPCM(pcm16);
+
         let binaryStr = '';
-        for (let i = 0; i < compressedUint8.length; i++) {
-            binaryStr += String.fromCharCode(compressedUint8[i]);
+        for (let i = 0; i < adpcmBytes.length; i++) {
+            binaryStr += String.fromCharCode(adpcmBytes[i]);
         }
 
         return {
             base64Audio: btoa(binaryStr),
             duration: recordingDurationSec,
-            byteCount: totalCompressedBytes
+            byteCount: adpcmBytes.length,
+            targetRate: targetRate,
+            totalSamples: pcm16.length
         };
     }
 
     function playCompressedAudio() {
-        let compressed = compressAudioToCodec2Payload();
+        let compressed = compressAudioToADPCMPayload();
         if (!compressed.base64Audio) return;
-        let float32Array = decompressCodec2PayloadToAudio(compressed.base64Audio, compressed.duration);
-        playAudioBuffer(float32Array);
+        let float32Array = decompressADPCMToAudio(compressed.base64Audio, compressed.totalSamples);
+        playAudioBuffer(float32Array, compressed.targetRate);
     }
 
-    function decompressCodec2PayloadToAudio(base64Str, durationSec) {
+    function decompressADPCMToAudio(base64Str, totalSamples) {
         let binaryStr = atob(base64Str);
         let len = binaryStr.length;
         let uint8 = new Uint8Array(len);
         for (let i = 0; i < len; i++) {
             uint8[i] = binaryStr.charCodeAt(i);
         }
-
-        let targetSampleCount = Math.floor(durationSec * 8000);
-        let float32Array = new Float32Array(targetSampleCount);
-        let step = len / targetSampleCount;
-
-        for (let i = 0; i < targetSampleCount; i++) {
-            let byteIdx = Math.floor(i * step);
-            let byteVal = uint8[byteIdx];
-            float32Array[i] = (byteVal / 127.5) - 1.0;
-        }
-
-        return float32Array;
+        return decodeIMAADPCM(uint8, totalSamples);
     }
 
-    async function playAudioBuffer(float32Array) {
+    async function playAudioBuffer(float32Array, sampleRate) {
         if (!float32Array || float32Array.length === 0) return;
         
         let playbackCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -377,7 +477,7 @@
             await playbackCtx.resume();
         }
 
-        let buffer = playbackCtx.createBuffer(1, float32Array.length, 8000);
+        let buffer = playbackCtx.createBuffer(1, float32Array.length, sampleRate);
         buffer.getChannelData(0).set(float32Array);
         
         let sourceNode = playbackCtx.createBufferSource();
@@ -448,13 +548,14 @@
         if (activeInputMode === 'text') {
             payloadData.data = document.getElementById('textContent').value;
         } else {
-            let compressed = compressAudioToCodec2Payload();
+            let compressed = compressAudioToADPCMPayload();
             if (!compressed.base64Audio) {
                 alert("Please record audio before generating QR code.");
                 return;
             }
             payloadData.data = compressed.base64Audio;
-            payloadData.dur = compressed.duration;
+            payloadData.sr = compressed.targetRate;
+            payloadData.samples = compressed.totalSamples;
         }
 
         let jsonStr = JSON.stringify(payloadData);
@@ -584,8 +685,9 @@
             } else if (parsed.type === 'audio') {
                 document.getElementById('decodedTextContainer').style.display = 'none';
                 document.getElementById('decodedAudioContainer').style.display = 'block';
-                decodedAudioDataBuffer = decompressCodec2PayloadToAudio(parsed.data, parsed.dur || 5);
-                playAudioBuffer(decodedAudioDataBuffer);
+                decodedSampleRate = parsed.sr || 4000;
+                decodedAudioDataBuffer = decompressADPCMToAudio(parsed.data, parsed.samples);
+                playAudioBuffer(decodedAudioDataBuffer, decodedSampleRate);
             }
         } catch (err) {
             alert('Decryption failed: Incorrect password or corrupted payload.');
@@ -594,7 +696,7 @@
 
     function playDecodedAudio() {
         if (decodedAudioDataBuffer) {
-            playAudioBuffer(decodedAudioDataBuffer);
+            playAudioBuffer(decodedAudioDataBuffer, decodedSampleRate);
         }
     }
 </script>
