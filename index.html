@@ -12,7 +12,6 @@
         h2 { margin-top: 0; color: #111; font-size: 1.25rem; border-bottom: 2px solid #eee; padding-bottom: 8px; }
         label { font-weight: bold; display: block; margin-top: 8px; margin-bottom: 4px; font-size: 0.85rem; }
         
-        /* 2-Column Grid for Half-Width Input Boxes */
         .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
         @media (max-width: 500px) { .form-grid { grid-template-columns: 1fr 1fr; } }
 
@@ -29,23 +28,18 @@
         .tab-content { display: none; }
         .tab-content.active { display: block; }
         
-        /* Camera & QR Display Styling */
         #scanVideo { width: 100%; max-height: 320px; object-fit: cover; border-radius: 6px; background: #000; display: none; }
         #qrCanvas { display: block; margin: 15px auto; max-width: 100%; height: auto; image-rendering: pixelated; }
         .output-box { background: #f8f9fa; border: 1px solid #e9ecef; padding: 12px; border-radius: 4px; font-family: monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto; }
     </style>
-    <!-- Offline QR generator and decoder engines -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 </head>
 <body>
 
 <div class="container">
-
-    <!-- Global Configuration Section -->
     <div class="card">
         <h2>Global Settings & Metadata Options</h2>
-        
         <div class="form-grid">
             <div>
                 <label for="projectName">Project Name:</label>
@@ -56,7 +50,6 @@
                 <input type="password" id="encPassword" placeholder="Optional (AES-256)">
             </div>
         </div>
-
         <div class="form-grid">
             <div>
                 <label>GPS Location:</label>
@@ -68,13 +61,12 @@
         </div>
     </div>
 
-    <!-- Main Navigation Tabs -->
     <div class="tabs">
         <button class="tab-btn active" onclick="switchSection('createSec', this)">1. Create QR Code</button>
         <button class="tab-btn" onclick="switchSection('scanSec', this)">2. Scan QR Code</button>
     </div>
 
-    <!-- SECTION 1: CREATE QR CODE -->
+    <!-- SECTION 1: CREATE -->
     <div id="createSec" class="tab-content active">
         <div class="card">
             <h2>Select Input Mode</h2>
@@ -83,20 +75,20 @@
                 <button class="tab-btn" id="audioModeBtn" onclick="switchInputMode('audio', this)">Audio Voice Recording</button>
             </div>
 
-            <!-- Text Input Sub-Section -->
             <div id="textInputArea">
                 <label for="textContent">Text Message Payload:</label>
                 <textarea id="textContent" rows="4" placeholder="Type message to encode..."></textarea>
             </div>
 
-            <!-- Audio Input Sub-Section -->
             <div id="audioInputArea" style="display:none;">
                 <label for="qualitySelect">Voice Quality Profile:</label>
                 <select id="qualitySelect">
-                    <option value="1000">1 kHz (~500 B/s) — Extreme QR Compression</option>
-                    <option value="2000" selected>2 kHz (~1000 B/s) — High QR Scannability</option>
-                    <option value="4000">4 kHz (~2000 B/s) — Standard Speech</option>
-                    <option value="6000">6 kHz (~3000 B/s) — High Clarity</option>
+                    <option value="1500">1.5 kHz (~750 B/s) — Extreme Compression</option>
+                    <option value="2000">2.0 kHz (~1000 B/s) — Enhanced Compact Voice</option>
+                    <option value="2500" selected>2.5 kHz (~1250 B/s) — Optimized Voice Balance</option>
+                    <option value="3000">3.0 kHz (~1500 B/s) — Minimum Clarity</option>
+                    <option value="4000">4.0 kHz (~2000 B/s) — Standard Speech</option>
+                    <option value="6000">6.0 kHz (~3000 B/s) — High Clarity</option>
                 </select>
 
                 <button id="recordBtn" onclick="toggleRecording()">Start Recording Voice</button>
@@ -114,7 +106,7 @@
         </div>
     </div>
 
-    <!-- SECTION 2: LIVE CAMERA SCAN & DECODE QR CODE -->
+    <!-- SECTION 2: SCAN -->
     <div id="scanSec" class="tab-content">
         <div class="card">
             <h2>Scan QR Code via Camera</h2>
@@ -124,7 +116,6 @@
             <div id="scanStatus" class="counter" style="margin-top:10px;">Camera idle. Tap button to start scanning.</div>
         </div>
 
-        <!-- Password Prompt Dialog -->
         <div class="card" id="passwordPromptCard" style="display:none; border: 2px solid var(--primary);">
             <h2>Locked Payload</h2>
             <p style="margin: 0 0 10px 0; font-size:14px;">This QR payload is encrypted with AES-256. Enter password to view content:</p>
@@ -132,7 +123,6 @@
             <button onclick="processDecryption()" class="btn-success">Decrypt & Open Payload</button>
         </div>
 
-        <!-- Decoded Output Card -->
         <div class="card" id="scanResultsCard" style="display:none;">
             <h2>Decoded Payload</h2>
             <div id="decodedMeta" class="counter" style="margin-bottom:12px;"></div>
@@ -148,11 +138,10 @@
             </div>
         </div>
     </div>
-
 </div>
 
 <script>
-    // --- Global Application State ---
+    // Global Application State
     let currentLocation = { lat: null, lon: null, text: "GPS Location Not Available" };
     let isRecording = false;
     let recordedChunks = [];
@@ -170,18 +159,15 @@
     let scanAnimationFrameId = null;
     let lastScannedRawData = null;
     let decodedAudioDataBuffer = null;
-    let decodedSampleRate = 2000;
+    let decodedSampleRate = 2500;
 
-    // --- Core Helper & GPS Functions ---
+    // Helper Functions
     function getDefaultProjectName() {
         const now = new Date();
-        const yy = String(now.getFullYear()).slice(-2);
-        const mm = String(now.getMonth() + 1).padStart(2, '0');
-        const dd = String(now.getDate()).padStart(2, '0');
-        const hh = String(now.getHours()).padStart(2, '0');
-        const min = String(now.getMinutes()).padStart(2, '0');
-        const ss = String(now.getSeconds()).padStart(2, '0');
-        return `QR2A_${yy}${mm}${dd}_${hh}${min}${ss}`;
+        const y = String(now.getFullYear()).slice(-2), m = String(now.getMonth() + 1).padStart(2, '0');
+        const d = String(now.getDate()).padStart(2, '0'), h = String(now.getHours()).padStart(2, '0');
+        const min = String(now.getMinutes()).padStart(2, '0'), s = String(now.getSeconds()).padStart(2, '0');
+        return `QR2A_${y}${m}${d}_${h}${min}${s}`;
     }
 
     function updateLocation() {
@@ -214,10 +200,7 @@
         document.querySelectorAll('.tabs .tab-btn').forEach(el => el.classList.remove('active'));
         document.getElementById(secId).classList.add('active');
         btn.classList.add('active');
-
-        if (secId !== 'scanSec') {
-            stopCameraScan();
-        }
+        if (secId !== 'scanSec') stopCameraScan();
     }
 
     function switchInputMode(mode, btn) {
@@ -225,17 +208,57 @@
         document.getElementById('textModeBtn').classList.remove('active');
         document.getElementById('audioModeBtn').classList.remove('active');
         btn.classList.add('active');
-
-        if (mode === 'text') {
-            document.getElementById('textInputArea').style.display = 'block';
-            document.getElementById('audioInputArea').style.display = 'none';
-        } else {
-            document.getElementById('textInputArea').style.display = 'none';
-            document.getElementById('audioInputArea').style.display = 'block';
-        }
+        document.getElementById('textInputArea').style.display = mode === 'text' ? 'block' : 'none';
+        document.getElementById('audioInputArea').style.display = mode === 'audio' ? 'block' : 'none';
     }
 
-    // --- Anti-Alias Audio Resampler ---
+    // --- Advanced DSP Audio Processing ---
+    function processDSP(rawBuffer, originalRate, targetRate) {
+        let len = rawBuffer.length;
+        let out = new Float32Array(len);
+        
+        // 1. High-Pass Filter (150Hz) to kill rumble and DC offset
+        let hpAlpha = 0.98; 
+        let lastIn = 0, lastOut = 0;
+        
+        // 2. Low-Pass Filter (Anti-aliasing tuned to target Nyquist)
+        let nyquist = targetRate / 2.0; 
+        let dt = 1.0 / originalRate;
+        let rc = 1.0 / (nyquist * 2 * Math.PI);
+        let lpAlpha = dt / (rc + dt);
+        let lp1 = 0, lp2 = 0; // 2-Pole cascade for steeper roll-off
+
+        let maxPeak = 0.001;
+
+        for (let i = 0; i < len; i++) {
+            let sample = rawBuffer[i];
+            
+            // HPF Calculation
+            let hpOut = sample - lastIn + hpAlpha * lastOut;
+            lastIn = sample;
+            lastOut = hpOut;
+
+            // LPF Calculation
+            lp1 += lpAlpha * (hpOut - lp1);
+            lp2 += lpAlpha * (lp1 - lp2);
+            out[i] = lp2;
+            
+            let abs = Math.abs(lp2);
+            if (abs > maxPeak) maxPeak = abs;
+        }
+
+        // 3. AGC & Dynamic Range Compression via Tanh Soft-Clipping
+        // We push the gain hard (3.0x max peak) to amplify quiet syllables, 
+        // then use tanh to smoothly flatten peaks instead of hard digital clipping.
+        let gain = (1.0 / maxPeak) * 3.0; 
+        for (let i = 0; i < len; i++) {
+            out[i] = Math.tanh(out[i] * gain) * 0.95; 
+        }
+
+        return out;
+    }
+
+    // Boxcar Resampler (Acts as an additional FIR low-pass filter during decimation)
     function resampleAudio(float32Array, inSampleRate, outSampleRate) {
         if (inSampleRate === outSampleRate) return float32Array;
         let ratio = inSampleRate / outSampleRate;
@@ -260,7 +283,7 @@
         return result;
     }
 
-    // --- IMA ADPCM Speech Codec (4-bit per sample) ---
+    // --- IMA ADPCM Codec ---
     const StepTable = [
         7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45,
         50, 55, 60, 66, 73, 80, 88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230,
@@ -272,12 +295,9 @@
     const IndexTable = [-1, -1, -1, -1, 2, 4, 6, 8, -1, -1, -1, -1, 2, 4, 6, 8];
 
     function encodeIMAADPCM(pcm16) {
-        let valpred = 0;
-        let index = 0;
-        let out = new Uint8Array(Math.ceil(pcm16.length / 2));
-        let outIdx = 0;
-        let buffer = 0;
+        let valpred = 0, index = 0, outIdx = 0, buffer = 0;
         let bufferstep = false;
+        let out = new Uint8Array(Math.ceil(pcm16.length / 2));
 
         for (let i = 0; i < pcm16.length; i++) {
             let sample = pcm16[i];
@@ -286,8 +306,7 @@
             let sign = (diff < 0) ? 8 : 0;
             if (sign) diff = -diff;
 
-            let delta = 0;
-            let vpdiff = (step >> 3);
+            let delta = 0, vpdiff = (step >> 3);
 
             if (diff >= step) { delta |= 4; diff -= step; vpdiff += step; }
             step >>= 1;
@@ -295,18 +314,13 @@
             step >>= 1;
             if (diff >= step) { delta |= 1; vpdiff += step; }
 
-            if (sign) valpred -= vpdiff;
-            else valpred += vpdiff;
-
-            if (valpred > 32767) valpred = 32767;
-            else if (valpred < -32768) valpred = -32768;
+            if (sign) valpred -= vpdiff; else valpred += vpdiff;
+            if (valpred > 32767) valpred = 32767; else if (valpred < -32768) valpred = -32768;
 
             index += IndexTable[delta | sign];
-            if (index < 0) index = 0;
-            if (index > 88) index = 88;
+            if (index < 0) index = 0; if (index > 88) index = 88;
 
             let nibble = delta | sign;
-
             if (bufferstep) {
                 out[outIdx++] = (nibble << 4) | buffer;
                 bufferstep = false;
@@ -320,10 +334,8 @@
     }
 
     function decodeIMAADPCM(adpcmUint8, totalSamples) {
-        let valpred = 0;
-        let index = 0;
+        let valpred = 0, index = 0, pcmIdx = 0;
         let pcm = new Float32Array(totalSamples);
-        let pcmIdx = 0;
 
         for (let i = 0; i < adpcmUint8.length && pcmIdx < totalSamples; i++) {
             let byte = adpcmUint8[i];
@@ -340,15 +352,11 @@
                 if (deltaCode & 2) vpdiff += (step >> 1);
                 if (deltaCode & 1) vpdiff += (step >> 2);
 
-                if (sign) valpred -= vpdiff;
-                else valpred += vpdiff;
-
-                if (valpred > 32767) valpred = 32767;
-                else if (valpred < -32768) valpred = -32768;
+                if (sign) valpred -= vpdiff; else valpred += vpdiff;
+                if (valpred > 32767) valpred = 32767; else if (valpred < -32768) valpred = -32768;
 
                 index += IndexTable[delta];
-                if (index < 0) index = 0;
-                if (index > 88) index = 88;
+                if (index < 0) index = 0; if (index > 88) index = 88;
 
                 pcm[pcmIdx++] = valpred / 32768.0;
             }
@@ -371,17 +379,14 @@
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                 hardwareSampleRate = audioCtx.sampleRate;
                 
-                if (audioCtx.state === 'suspended') {
-                    await audioCtx.resume();
-                }
+                if (audioCtx.state === 'suspended') await audioCtx.resume();
 
                 let source = audioCtx.createMediaStreamSource(mediaStream);
                 processor = audioCtx.createScriptProcessor(2048, 1, 1);
 
                 processor.onaudioprocess = function(e) {
                     if (!isRecording) return;
-                    let inputData = e.inputBuffer.getChannelData(0);
-                    recordedChunks.push(new Float32Array(inputData));
+                    recordedChunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
                 };
 
                 source.connect(processor);
@@ -418,18 +423,23 @@
     }
 
     function compressAudioToADPCMPayload() {
-        if (!recordedChunks || recordedChunks.length === 0) return { base64Audio: "", duration: 0, byteCount: 0, targetRate: 2000 };
+        if (!recordedChunks || recordedChunks.length === 0) return { base64Audio: "", duration: 0, byteCount: 0, targetRate: 2500 };
 
         let totalLength = recordedChunks.reduce((acc, chunk) => acc + chunk.length, 0);
-        let raw48k = new Float32Array(totalLength);
+        let rawBuffer = new Float32Array(totalLength);
         let offset = 0;
         for (let chunk of recordedChunks) {
-            raw48k.set(chunk, offset);
+            rawBuffer.set(chunk, offset);
             offset += chunk.length;
         }
 
         let targetRate = parseInt(document.getElementById('qualitySelect').value);
-        let resampled = resampleAudio(raw48k, hardwareSampleRate, targetRate);
+        
+        // Pass 1: DSP Enhancements
+        let enhancedBuffer = processDSP(rawBuffer, hardwareSampleRate, targetRate);
+        
+        // Pass 2: Resampling
+        let resampled = resampleAudio(enhancedBuffer, hardwareSampleRate, targetRate);
 
         let pcm16 = new Int16Array(resampled.length);
         for (let i = 0; i < resampled.length; i++) {
@@ -438,11 +448,8 @@
         }
 
         let adpcmBytes = encodeIMAADPCM(pcm16);
-
         let binaryStr = '';
-        for (let i = 0; i < adpcmBytes.length; i++) {
-            binaryStr += String.fromCharCode(adpcmBytes[i]);
-        }
+        for (let i = 0; i < adpcmBytes.length; i++) binaryStr += String.fromCharCode(adpcmBytes[i]);
 
         return {
             base64Audio: btoa(binaryStr),
@@ -464,9 +471,7 @@
         let binaryStr = atob(base64Str);
         let len = binaryStr.length;
         let uint8 = new Uint8Array(len);
-        for (let i = 0; i < len; i++) {
-            uint8[i] = binaryStr.charCodeAt(i);
-        }
+        for (let i = 0; i < len; i++) uint8[i] = binaryStr.charCodeAt(i);
         return decodeIMAADPCM(uint8, totalSamples);
     }
 
@@ -474,12 +479,8 @@
         if (!float32Array || float32Array.length === 0) return;
         
         let playbackCtx = new (window.AudioContext || window.webkitAudioContext)();
-        if (playbackCtx.state === 'suspended') {
-            await playbackCtx.resume();
-        }
+        if (playbackCtx.state === 'suspended') await playbackCtx.resume();
 
-        // Web Audio API requires sample rates >= 8000 Hz on some mobile browsers.
-        // Interpolate low rates (e.g. 1000/2000 Hz) up to 8000 Hz for universal compatibility.
         let outRate = Math.max(8000, sampleRate);
         let playBufferData = float32Array;
 
@@ -511,10 +512,7 @@
         let keyMaterial = await window.crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveKey"]);
         return window.crypto.subtle.deriveKey(
             { name: "PBKDF2", salt: salt, iterations: 100000, hash: "SHA-256" },
-            keyMaterial,
-            { name: "AES-GCM", length: 256 },
-            false,
-            ["encrypt", "decrypt"]
+            keyMaterial, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]
         );
     }
 
@@ -526,14 +524,10 @@
         let encrypted = await window.crypto.subtle.encrypt({ name: "AES-GCM", iv: iv }, key, enc.encode(plaintext));
         
         let combined = new Uint8Array(salt.length + iv.length + encrypted.byteLength);
-        combined.set(salt, 0);
-        combined.set(iv, salt.length);
-        combined.set(new Uint8Array(encrypted), salt.length + iv.length);
+        combined.set(salt, 0); combined.set(iv, salt.length); combined.set(new Uint8Array(encrypted), salt.length + iv.length);
         
         let binaryStr = '';
-        for (let i = 0; i < combined.length; i++) {
-            binaryStr += String.fromCharCode(combined[i]);
-        }
+        for (let i = 0; i < combined.length; i++) binaryStr += String.fromCharCode(combined[i]);
         return btoa(binaryStr);
     }
 
@@ -542,36 +536,25 @@
         let bytes = new Uint8Array(binaryStr.length);
         for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
 
-        let salt = bytes.slice(0, 16);
-        let iv = bytes.slice(16, 28);
-        let data = bytes.slice(28);
-
+        let salt = bytes.slice(0, 16), iv = bytes.slice(16, 28), data = bytes.slice(28);
         let key = await deriveKey(password, salt);
         let decrypted = await window.crypto.subtle.decrypt({ name: "AES-GCM", iv: iv }, key, data);
         return new TextDecoder().decode(decrypted);
     }
 
-    // --- QR Code Generator ---
+    // --- QR Generator ---
     async function generateQRCode() {
         let projName = document.getElementById('projectName').value.trim() || getDefaultProjectName();
         let pwd = document.getElementById('encPassword').value;
-        let timestamp = new Date().toISOString();
-
         let payloadData = {
-            project: projName,
-            timestamp: timestamp,
-            gps: currentLocation.text,
-            type: activeInputMode
+            project: projName, timestamp: new Date().toISOString(), gps: currentLocation.text, type: activeInputMode
         };
 
         if (activeInputMode === 'text') {
             payloadData.data = document.getElementById('textContent').value;
         } else {
             let compressed = compressAudioToADPCMPayload();
-            if (!compressed.base64Audio) {
-                alert("Please record audio before generating QR code.");
-                return;
-            }
+            if (!compressed.base64Audio) return alert("Please record audio before generating QR code.");
             payloadData.data = compressed.base64Audio;
             payloadData.sr = compressed.targetRate;
             payloadData.samples = compressed.totalSamples;
@@ -587,21 +570,16 @@
         }
 
         qr = new QRious({
-            element: document.getElementById('qrCanvas'),
-            value: jsonStr,
-            size: 300,
-            level: 'L'
+            element: document.getElementById('qrCanvas'), value: jsonStr, size: 300, level: 'L'
         });
 
         document.getElementById('qrResultCard').style.display = 'block';
         document.getElementById('payloadStats').innerHTML = 
-            `<b>Project Name:</b> ${projName}<br>` +
-            `<b>Encrypted:</b> ${isEncrypted ? 'Yes (AES-256)' : 'No'}<br>` +
-            `<b>Payload Type:</b> ${activeInputMode.toUpperCase()}<br>` +
-            `<b>Total String Length:</b> ${jsonStr.length} chars`;
+            `<b>Project Name:</b> ${projName}<br><b>Encrypted:</b> ${isEncrypted ? 'Yes (AES-256)' : 'No'}<br>` +
+            `<b>Payload Type:</b> ${activeInputMode.toUpperCase()}<br><b>Total Length:</b> ${jsonStr.length} chars`;
     }
 
-    // --- Live Camera Scanner Engine ---
+    // --- QR Scanner ---
     async function startCameraScan() {
         let video = document.getElementById('scanVideo');
         let statusEl = document.getElementById('scanStatus');
@@ -610,8 +588,7 @@
 
         try {
             scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-            video.srcObject = scanStream;
-            video.style.display = 'block';
+            video.srcObject = scanStream; video.style.display = 'block';
             document.getElementById('startCamBtn').style.display = 'none';
             document.getElementById('stopCamBtn').style.display = 'block';
             document.getElementById('passwordPromptCard').style.display = 'none';
@@ -620,8 +597,7 @@
 
             function scanTick() {
                 if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                    canvas.height = video.videoHeight;
-                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight; canvas.width = video.videoWidth;
                     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                     let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                     let code = jsQR(imageData.data, imageData.width, imageData.height);
@@ -636,19 +612,12 @@
                 scanAnimationFrameId = requestAnimationFrame(scanTick);
             }
             scanAnimationFrameId = requestAnimationFrame(scanTick);
-        } catch (err) {
-            statusEl.innerText = "Camera Error: " + err.message;
-        }
+        } catch (err) { statusEl.innerText = "Camera Error: " + err.message; }
     }
 
     function stopCameraScan() {
-        if (scanStream) {
-            scanStream.getTracks().forEach(track => track.stop());
-            scanStream = null;
-        }
-        if (scanAnimationFrameId) {
-            cancelAnimationFrame(scanAnimationFrameId);
-        }
+        if (scanStream) { scanStream.getTracks().forEach(t => t.stop()); scanStream = null; }
+        if (scanAnimationFrameId) cancelAnimationFrame(scanAnimationFrameId);
         document.getElementById('scanVideo').style.display = 'none';
         document.getElementById('startCamBtn').style.display = 'block';
         document.getElementById('stopCamBtn').style.display = 'none';
@@ -662,40 +631,26 @@
                 document.getElementById('passwordPromptCard').style.display = 'block';
                 document.getElementById('decPassword').value = '';
                 document.getElementById('decPassword').focus();
-            } else {
-                processDecryption();
-            }
-        } catch (err) {
-            alert('Scanned QR code contains invalid data format.');
-        }
+            } else processDecryption();
+        } catch (err) { alert('Scanned QR code contains invalid data format.'); }
     }
 
     async function processDecryption() {
         if (!lastScannedRawData) return;
-
         let pwd = document.getElementById('decPassword').value;
         let finalJsonStr = lastScannedRawData;
 
         try {
             let parsed = JSON.parse(lastScannedRawData);
             if (parsed.enc) {
-                if (!pwd) {
-                    alert('Please enter the password to decrypt this payload.');
-                    return;
-                }
+                if (!pwd) return alert('Please enter the password to decrypt this payload.');
                 finalJsonStr = await decryptString(parsed.payload, pwd);
                 parsed = JSON.parse(finalJsonStr);
             }
 
             document.getElementById('passwordPromptCard').style.display = 'none';
             document.getElementById('scanResultsCard').style.display = 'block';
-
-            let metaText = `Project Name: ${parsed.project}\n` +
-                           `Timestamp: ${parsed.timestamp}\n` +
-                           `GPS Location: ${parsed.gps}\n` +
-                           `Input Mode: ${parsed.type.toUpperCase()}`;
-            
-            document.getElementById('decodedMeta').innerText = metaText;
+            document.getElementById('decodedMeta').innerText = `Project Name: ${parsed.project}\nTimestamp: ${parsed.timestamp}\nGPS Location: ${parsed.gps}\nInput Mode: ${parsed.type.toUpperCase()}`;
 
             if (parsed.type === 'text') {
                 document.getElementById('decodedTextContainer').style.display = 'block';
@@ -704,19 +659,15 @@
             } else if (parsed.type === 'audio') {
                 document.getElementById('decodedTextContainer').style.display = 'none';
                 document.getElementById('decodedAudioContainer').style.display = 'block';
-                decodedSampleRate = parsed.sr || 2000;
+                decodedSampleRate = parsed.sr || 2500;
                 decodedAudioDataBuffer = decompressADPCMToAudio(parsed.data, parsed.samples);
                 playAudioBuffer(decodedAudioDataBuffer, decodedSampleRate);
             }
-        } catch (err) {
-            alert('Decryption failed: Incorrect password or corrupted payload.');
-        }
+        } catch (err) { alert('Decryption failed: Incorrect password or corrupted payload.'); }
     }
 
     function playDecodedAudio() {
-        if (decodedAudioDataBuffer) {
-            playAudioBuffer(decodedAudioDataBuffer, decodedSampleRate);
-        }
+        if (decodedAudioDataBuffer) playAudioBuffer(decodedAudioDataBuffer, decodedSampleRate);
     }
 </script>
 </body>
