@@ -14,7 +14,7 @@
         
         /* 2-Column Grid for Half-Width Input Boxes */
         .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
-        @media (max-width: 500px) { .form-grid { grid-template-columns: 1fr; } }
+        @media (max-width: 500px) { .form-grid { grid-template-columns: 1fr 1fr; } }
 
         input[type="text"], input[type="password"], select, textarea { width: 100%; padding: 10px; border-radius: 4px; border: 1px solid #ccc; box-sizing: border-box; font-size: 14px; }
         button { padding: 12px 16px; font-size: 15px; font-weight: bold; cursor: pointer; background: var(--primary); color: white; border: none; border-radius: 4px; width: 100%; margin-top: 10px; transition: 0.2s; }
@@ -94,8 +94,8 @@
                 <label for="qualitySelect">Codec2 Quality Profile:</label>
                 <select id="qualitySelect">
                     <option value="3200">High Quality (3200 bps) — Max ~5 sec</option>
-                    <option value="2400" selected>Balanced (2400 bps) — Max ~6.6 sec</option>
-                    <option value="1300">Max Duration (1300 bps) — Max ~12 sec</option>
+                    <option value="2400">Balanced (2400 bps) — Max ~6.6 sec</option>
+                    <option value="1300" selected>Max Duration (1300 bps) — Max ~12 sec</option>
                 </select>
 
                 <button id="recordBtn" onclick="toggleRecording()">Start Recording Voice</button>
@@ -238,7 +238,7 @@
         }
     }
 
-    // --- Audio Recording & Packing ---
+    // --- Audio Recording Engine (Mobile Optimized) ---
     async function toggleRecording() {
         let btn = document.getElementById('recordBtn');
         let playBtn = document.getElementById('playBtn');
@@ -246,13 +246,26 @@
         if (!isRecording) {
             try {
                 recordedChunks = [];
-                mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 8000 });
+                mediaStream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: { 
+                        echoCancellation: true, 
+                        noiseSuppression: false, 
+                        autoGainControl: true 
+                    } 
+                });
+
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                 
+                // Force-resume AudioContext for iOS Safari and Android Chrome
+                if (audioCtx.state === 'suspended') {
+                    await audioCtx.resume();
+                }
+
                 let source = audioCtx.createMediaStreamSource(mediaStream);
-                processor = audioCtx.createScriptProcessor(512, 1, 1);
+                processor = audioCtx.createScriptProcessor(2048, 1, 1);
 
                 processor.onaudioprocess = function(e) {
+                    if (!isRecording) return;
                     let inputData = e.inputBuffer.getChannelData(0);
                     recordedChunks.push(new Float32Array(inputData));
                 };
@@ -270,14 +283,17 @@
                 alert('Microphone error: ' + err.message);
             }
         } else {
+            isRecording = false;
             if (processor) processor.disconnect();
             if (mediaStream) mediaStream.getTracks().forEach(track => track.stop());
-            if (audioCtx) audioCtx.close();
-
-            isRecording = false;
+            
             recordingDurationSec = (Date.now() - recordingStartTime) / 1000.0;
             btn.innerText = 'Start Recording Voice';
             btn.className = '';
+
+            if (audioCtx) {
+                await audioCtx.close();
+            }
 
             let totalSamples = recordedChunks.reduce((acc, chunk) => acc + chunk.length, 0);
             if (totalSamples > 0) {
@@ -353,11 +369,17 @@
         return float32Array;
     }
 
-    function playAudioBuffer(float32Array) {
+    async function playAudioBuffer(float32Array) {
         if (!float32Array || float32Array.length === 0) return;
-        let playbackCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 8000 });
+        
+        let playbackCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (playbackCtx.state === 'suspended') {
+            await playbackCtx.resume();
+        }
+
         let buffer = playbackCtx.createBuffer(1, float32Array.length, 8000);
         buffer.getChannelData(0).set(float32Array);
+        
         let sourceNode = playbackCtx.createBufferSource();
         sourceNode.buffer = buffer;
         sourceNode.connect(playbackCtx.destination);
@@ -517,12 +539,10 @@
         try {
             let parsed = JSON.parse(rawData);
             if (parsed.enc) {
-                // If encrypted, prompt for password
                 document.getElementById('passwordPromptCard').style.display = 'block';
                 document.getElementById('decPassword').value = '';
                 document.getElementById('decPassword').focus();
             } else {
-                // If not encrypted, immediately decrypt/display content
                 processDecryption();
             }
         } catch (err) {
