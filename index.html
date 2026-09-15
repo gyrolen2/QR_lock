@@ -83,16 +83,14 @@
             <div id="audioInputArea" style="display:none;">
                 <label for="qualitySelect">Voice Quality Profile:</label>
                 <select id="qualitySelect">
-                    <option value="1500">1.5 kHz (~750 B/s) — Extreme Compression</option>
-                    <option value="2000">2.0 kHz (~1000 B/s) — Enhanced Compact Voice</option>
-                    <option value="2500" selected>2.5 kHz (~1250 B/s) — Optimized Voice Balance</option>
+                    <option value="1500" selected>1.5 kHz (~750 B/s) — Max Compression</option>
+                    <option value="2000">2.0 kHz (~1000 B/s) — Enhanced Compact</option>
+                    <option value="2500">2.5 kHz (~1250 B/s) — Voice Balance</option>
                     <option value="3000">3.0 kHz (~1500 B/s) — Minimum Clarity</option>
-                    <option value="4000">4.0 kHz (~2000 B/s) — Standard Speech</option>
-                    <option value="6000">6.0 kHz (~3000 B/s) — High Clarity</option>
                 </select>
 
                 <button id="recordBtn" onclick="toggleRecording()">Start Recording Voice</button>
-                <button id="playBtn" onclick="playCompressedAudio()" disabled class="btn-success">Play Voice Preview</button>
+                <button id="playBtn" onclick="playCompressedAudio()" disabled class="btn-success">Play Trimmed Preview</button>
                 <div id="sizeCounter" class="counter" style="margin-top:10px;">Payload Status: No audio recorded.</div>
             </div>
 
@@ -148,18 +146,18 @@
     let audioCtx = null;
     let mediaStream = null;
     let processor = null;
-    let recordingDurationSec = 0;
     let recordingStartTime = 0;
     let activeInputMode = 'text';
     let qr = null;
     let hardwareSampleRate = 48000;
+    let trimmedDurationSec = 0;
     
     // Scanner State
     let scanStream = null;
     let scanAnimationFrameId = null;
     let lastScannedRawData = null;
     let decodedAudioDataBuffer = null;
-    let decodedSampleRate = 2500;
+    let decodedSampleRate = 1500;
 
     // Helper Functions
     function getDefaultProjectName() {
@@ -217,28 +215,34 @@
         let len = rawBuffer.length;
         let out = new Float32Array(len);
         
-        // 1. High-Pass Filter (150Hz) to kill rumble and DC offset
         let hpAlpha = 0.98; 
         let lastIn = 0, lastOut = 0;
         
-        // 2. Low-Pass Filter (Anti-aliasing tuned to target Nyquist)
         let nyquist = targetRate / 2.0; 
         let dt = 1.0 / originalRate;
         let rc = 1.0 / (nyquist * 2 * Math.PI);
         let lpAlpha = dt / (rc + dt);
-        let lp1 = 0, lp2 = 0; // 2-Pole cascade for steeper roll-off
+        let lp1 = 0, lp2 = 0; 
+
+        // NEW: Pre-emphasis filter to boost consonants
+        let preEmpAlpha = 0.85; 
+        let lastPreEmp = 0;
 
         let maxPeak = 0.001;
 
         for (let i = 0; i < len; i++) {
             let sample = rawBuffer[i];
             
-            // HPF Calculation
-            let hpOut = sample - lastIn + hpAlpha * lastOut;
-            lastIn = sample;
+            // 1. Pre-emphasis (Sharpen voice)
+            let pre = sample - preEmpAlpha * lastPreEmp;
+            lastPreEmp = sample;
+
+            // 2. High-Pass Filter
+            let hpOut = pre - lastIn + hpAlpha * lastOut;
+            lastIn = pre;
             lastOut = hpOut;
 
-            // LPF Calculation
+            // 3. Low-Pass Filter (Anti-aliasing)
             lp1 += lpAlpha * (hpOut - lp1);
             lp2 += lpAlpha * (lp1 - lp2);
             out[i] = lp2;
@@ -247,10 +251,8 @@
             if (abs > maxPeak) maxPeak = abs;
         }
 
-        // 3. AGC & Dynamic Range Compression via Tanh Soft-Clipping
-        // We push the gain hard (3.0x max peak) to amplify quiet syllables, 
-        // then use tanh to smoothly flatten peaks instead of hard digital clipping.
-        let gain = (1.0 / maxPeak) * 3.0; 
+        // 4. AGC & Soft-Clipping
+        let gain = (1.0 / maxPeak) * 3.5; // Push gain even harder for pre-emphasized signal
         for (let i = 0; i < len; i++) {
             out[i] = Math.tanh(out[i] * gain) * 0.95; 
         }
@@ -258,7 +260,6 @@
         return out;
     }
 
-    // Boxcar Resampler (Acts as an additional FIR low-pass filter during decimation)
     function resampleAudio(float32Array, inSampleRate, outSampleRate) {
         if (inSampleRate === outSampleRate) return float32Array;
         let ratio = inSampleRate / outSampleRate;
@@ -272,8 +273,7 @@
             start = Math.max(0, start);
             end = Math.min(float32Array.length, end);
             
-            let sum = 0;
-            let count = 0;
+            let sum = 0, count = 0;
             for (let j = start; j < end; j++) {
                 sum += float32Array[j];
                 count++;
@@ -321,13 +321,8 @@
             if (index < 0) index = 0; if (index > 88) index = 88;
 
             let nibble = delta | sign;
-            if (bufferstep) {
-                out[outIdx++] = (nibble << 4) | buffer;
-                bufferstep = false;
-            } else {
-                buffer = nibble;
-                bufferstep = true;
-            }
+            if (bufferstep) { out[outIdx++] = (nibble << 4) | buffer; bufferstep = false; } 
+            else { buffer = nibble; bufferstep = true; }
         }
         if (bufferstep) out[outIdx] = buffer;
         return out;
@@ -406,24 +401,24 @@
             if (processor) processor.disconnect();
             if (mediaStream) mediaStream.getTracks().forEach(track => track.stop());
             
-            recordingDurationSec = (Date.now() - recordingStartTime) / 1000.0;
             btn.innerText = 'Start Recording Voice';
             btn.className = '';
 
             if (audioCtx) await audioCtx.close();
 
-            let totalSamples = recordedChunks.reduce((acc, chunk) => acc + chunk.length, 0);
-            if (totalSamples > 0) {
-                let compressed = compressAudioToADPCMPayload();
+            let compressed = compressAudioToADPCMPayload();
+            if (compressed.byteCount > 0) {
                 document.getElementById('sizeCounter').innerText = 
-                    `Duration: ${recordingDurationSec.toFixed(2)}s | Payload Size: ~${compressed.byteCount} bytes`;
+                    `Voice Detected: ${compressed.duration.toFixed(2)}s | Payload Size: ~${compressed.byteCount} bytes`;
                 playBtn.disabled = false;
+            } else {
+                document.getElementById('sizeCounter').innerText = "No voice detected. Payload empty.";
             }
         }
     }
 
     function compressAudioToADPCMPayload() {
-        if (!recordedChunks || recordedChunks.length === 0) return { base64Audio: "", duration: 0, byteCount: 0, targetRate: 2500 };
+        if (!recordedChunks || recordedChunks.length === 0) return { base64Audio: "", duration: 0, byteCount: 0, targetRate: 1500 };
 
         let totalLength = recordedChunks.reduce((acc, chunk) => acc + chunk.length, 0);
         let rawBuffer = new Float32Array(totalLength);
@@ -433,9 +428,28 @@
             offset += chunk.length;
         }
 
+        // NEW: Auto-Trim Silence (Voice Activity Detection)
+        // Crop audio to only the segment containing actual voice > 2% amplitude
+        let trimThreshold = 0.02; 
+        let margin = Math.floor(hardwareSampleRate * 0.15); // Leave 150ms padding
+        let startIdx = 0;
+        let endIdx = rawBuffer.length - 1;
+        
+        for(let i=0; i<rawBuffer.length; i++) {
+            if(Math.abs(rawBuffer[i]) > trimThreshold) { startIdx = Math.max(0, i - margin); break; }
+        }
+        for(let i=rawBuffer.length-1; i>=0; i--) {
+            if(Math.abs(rawBuffer[i]) > trimThreshold) { endIdx = Math.min(rawBuffer.length - 1, i + margin); break; }
+        }
+        
+        if (startIdx >= endIdx) return { base64Audio: "", duration: 0, byteCount: 0, targetRate: 1500 }; // Entirely silent
+        
+        rawBuffer = rawBuffer.slice(startIdx, endIdx + 1);
+        trimmedDurationSec = rawBuffer.length / hardwareSampleRate;
+
         let targetRate = parseInt(document.getElementById('qualitySelect').value);
         
-        // Pass 1: DSP Enhancements
+        // Pass 1: DSP Enhancements (Pre-emphasis + Filters)
         let enhancedBuffer = processDSP(rawBuffer, hardwareSampleRate, targetRate);
         
         // Pass 2: Resampling
@@ -453,7 +467,7 @@
 
         return {
             base64Audio: btoa(binaryStr),
-            duration: recordingDurationSec,
+            duration: trimmedDurationSec,
             byteCount: adpcmBytes.length,
             targetRate: targetRate,
             totalSamples: pcm16.length
@@ -659,7 +673,7 @@
             } else if (parsed.type === 'audio') {
                 document.getElementById('decodedTextContainer').style.display = 'none';
                 document.getElementById('decodedAudioContainer').style.display = 'block';
-                decodedSampleRate = parsed.sr || 2500;
+                decodedSampleRate = parsed.sr || 1500;
                 decodedAudioDataBuffer = decompressADPCMToAudio(parsed.data, parsed.samples);
                 playAudioBuffer(decodedAudioDataBuffer, decodedSampleRate);
             }
