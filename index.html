@@ -93,9 +93,10 @@
             <div id="audioInputArea" style="display:none;">
                 <label for="qualitySelect">Voice Quality Profile:</label>
                 <select id="qualitySelect">
-                    <option value="4000" selected>4 kHz Speech (2000 B/s) — Best QR Scannability</option>
-                    <option value="6000">6 kHz Speech (3000 B/s) — Balanced Clarity</option>
-                    <option value="8000">8 kHz Speech (4000 B/s) — High Clarity</option>
+                    <option value="1000">1 kHz (~500 B/s) — Extreme QR Compression</option>
+                    <option value="2000" selected>2 kHz (~1000 B/s) — High QR Scannability</option>
+                    <option value="4000">4 kHz (~2000 B/s) — Standard Speech</option>
+                    <option value="6000">6 kHz (~3000 B/s) — High Clarity</option>
                 </select>
 
                 <button id="recordBtn" onclick="toggleRecording()">Start Recording Voice</button>
@@ -169,7 +170,7 @@
     let scanAnimationFrameId = null;
     let lastScannedRawData = null;
     let decodedAudioDataBuffer = null;
-    let decodedSampleRate = 4000;
+    let decodedSampleRate = 2000;
 
     // --- Core Helper & GPS Functions ---
     function getDefaultProjectName() {
@@ -234,7 +235,7 @@
         }
     }
 
-    // --- Anti-Alias Audio Resampler (Hardware Rate -> Target Rate) ---
+    // --- Anti-Alias Audio Resampler ---
     function resampleAudio(float32Array, inSampleRate, outSampleRate) {
         if (inSampleRate === outSampleRate) return float32Array;
         let ratio = inSampleRate / outSampleRate;
@@ -417,7 +418,7 @@
     }
 
     function compressAudioToADPCMPayload() {
-        if (!recordedChunks || recordedChunks.length === 0) return { base64Audio: "", duration: 0, byteCount: 0, targetRate: 4000 };
+        if (!recordedChunks || recordedChunks.length === 0) return { base64Audio: "", duration: 0, byteCount: 0, targetRate: 2000 };
 
         let totalLength = recordedChunks.reduce((acc, chunk) => acc + chunk.length, 0);
         let raw48k = new Float32Array(totalLength);
@@ -477,8 +478,26 @@
             await playbackCtx.resume();
         }
 
-        let buffer = playbackCtx.createBuffer(1, float32Array.length, sampleRate);
-        buffer.getChannelData(0).set(float32Array);
+        // Web Audio API requires sample rates >= 8000 Hz on some mobile browsers.
+        // Interpolate low rates (e.g. 1000/2000 Hz) up to 8000 Hz for universal compatibility.
+        let outRate = Math.max(8000, sampleRate);
+        let playBufferData = float32Array;
+
+        if (sampleRate < 8000) {
+            let scale = 8000 / sampleRate;
+            let newLen = Math.floor(float32Array.length * scale);
+            playBufferData = new Float32Array(newLen);
+            for (let i = 0; i < newLen; i++) {
+                let origIdx = i / scale;
+                let idx0 = Math.floor(origIdx);
+                let idx1 = Math.min(float32Array.length - 1, idx0 + 1);
+                let frac = origIdx - idx0;
+                playBufferData[i] = float32Array[idx0] * (1 - frac) + float32Array[idx1] * frac;
+            }
+        }
+
+        let buffer = playbackCtx.createBuffer(1, playBufferData.length, outRate);
+        buffer.getChannelData(0).set(playBufferData);
         
         let sourceNode = playbackCtx.createBufferSource();
         sourceNode.buffer = buffer;
@@ -685,7 +704,7 @@
             } else if (parsed.type === 'audio') {
                 document.getElementById('decodedTextContainer').style.display = 'none';
                 document.getElementById('decodedAudioContainer').style.display = 'block';
-                decodedSampleRate = parsed.sr || 4000;
+                decodedSampleRate = parsed.sr || 2000;
                 decodedAudioDataBuffer = decompressADPCMToAudio(parsed.data, parsed.samples);
                 playAudioBuffer(decodedAudioDataBuffer, decodedSampleRate);
             }
