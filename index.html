@@ -15,7 +15,7 @@
         .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
         @media (max-width: 500px) { .form-grid { grid-template-columns: 1fr 1fr; } }
 
-        input[type="text"], input[type="password"], select, textarea { width: 100%; padding: 10px; border-radius: 4px; border: 1px solid #ccc; box-sizing: border-box; font-size: 14px; }
+        input[type="text"], input[type="password"], select, textarea, input[type="file"] { width: 100%; padding: 10px; border-radius: 4px; border: 1px solid #ccc; box-sizing: border-box; font-size: 14px; }
         button { padding: 12px 16px; font-size: 15px; font-weight: bold; cursor: pointer; background: var(--primary); color: white; border: none; border-radius: 4px; width: 100%; margin-top: 10px; transition: 0.2s; }
         button:hover { opacity: 0.9; }
         button:disabled { background: #ccc; cursor: not-allowed; }
@@ -31,6 +31,10 @@
         #scanVideo { width: 100%; max-height: 320px; object-fit: cover; border-radius: 6px; background: #000; display: none; }
         #qrCanvas { display: block; margin: 15px auto; max-width: 100%; height: auto; image-rendering: pixelated; }
         .output-box { background: #f8f9fa; border: 1px solid #e9ecef; padding: 12px; border-radius: 4px; font-family: monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto; }
+        
+        .radio-group { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; margin-bottom: 10px; }
+        .radio-container { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: normal; margin: 0; }
+        .radio-container input { width: auto; margin: 0; transform: scale(1.2); }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
@@ -94,13 +98,26 @@
                 <div id="sizeCounter" class="counter" style="margin-top:10px;">Payload Status: No audio recorded.</div>
             </div>
 
-            <!-- NEW FEATURE: Custom Center Logo -->
-            <div style="margin-top: 15px;">
-                <label for="logoInput">Custom Center Logo (Optional, Image File):</label>
-                <input type="file" id="logoInput" accept="image/*" onchange="handleLogoUpload(event)" style="background: white;">
+            <div style="margin-top: 15px; padding-top: 10px; border-top: 1px solid #eee;">
+                <label>Center Logo Options:</label>
+                <div class="radio-group">
+                    <label class="radio-container">
+                        <input type="radio" name="logoOpt" value="none" checked onchange="toggleCustomLogo()"> 1. No Logo (Default)
+                    </label>
+                    <label class="radio-container">
+                        <input type="radio" name="logoOpt" value="qrlock" onchange="toggleCustomLogo()"> 2. Use Standard QR_Lock (QR_Lock_logo_3.png)
+                    </label>
+                    <label class="radio-container">
+                        <input type="radio" name="logoOpt" value="custom" onchange="toggleCustomLogo()"> 3. Choose Custom Image...
+                    </label>
+                </div>
+                
+                <div id="customLogoContainer" style="display: none; padding-left: 25px; margin-top: 5px;">
+                    <input type="file" id="customLogoFile" accept="image/*" style="padding: 6px;">
+                </div>
             </div>
 
-            <button class="btn-success" style="margin-top: 20px;" onclick="generateQRCode()">Generate Offline Encrypted QR Code</button>
+            <button class="btn-success" style="margin-top: 15px;" onclick="generateQRCode()">Generate Offline Encrypted QR Code</button>
         </div>
 
         <div class="card" id="qrResultCard" style="display:none;">
@@ -157,7 +174,6 @@
     let qr = null;
     let hardwareSampleRate = 48000;
     let trimmedDurationSec = 0;
-    let customLogo = null; // New state variable for the custom logo
     
     // Scanner State
     let scanStream = null;
@@ -217,17 +233,9 @@
         document.getElementById('audioInputArea').style.display = mode === 'audio' ? 'block' : 'none';
     }
 
-    // NEW FUNCTION: Handle loading the logo file from the input
-    function handleLogoUpload(event) {
-        let file = event.target.files[0];
-        if (!file) { customLogo = null; return; }
-        let reader = new FileReader();
-        reader.onload = function(e) {
-            let img = new Image();
-            img.onload = function() { customLogo = img; };
-            img.src = e.target.result;
-        };
-        reader.readAsDataURL(file);
+    function toggleCustomLogo() {
+        let opt = document.querySelector('input[name="logoOpt"]:checked').value;
+        document.getElementById('customLogoContainer').style.display = (opt === 'custom') ? 'block' : 'none';
     }
 
     // --- Advanced DSP Audio Processing ---
@@ -244,7 +252,7 @@
         let lpAlpha = dt / (rc + dt);
         let lp1 = 0, lp2 = 0; 
 
-        // NEW: Pre-emphasis filter to boost consonants
+        // Pre-emphasis filter to boost consonants
         let preEmpAlpha = 0.85; 
         let lastPreEmp = 0;
 
@@ -272,7 +280,7 @@
         }
 
         // 4. AGC & Soft-Clipping
-        let gain = (1.0 / maxPeak) * 3.5; // Push gain even harder for pre-emphasized signal
+        let gain = (1.0 / maxPeak) * 3.5; 
         for (let i = 0; i < len; i++) {
             out[i] = Math.tanh(out[i] * gain) * 0.95; 
         }
@@ -448,10 +456,9 @@
             offset += chunk.length;
         }
 
-        // NEW: Auto-Trim Silence (Voice Activity Detection)
-        // Crop audio to only the segment containing actual voice > 2% amplitude
+        // Auto-Trim Silence (Voice Activity Detection)
         let trimThreshold = 0.02; 
-        let margin = Math.floor(hardwareSampleRate * 0.15); // Leave 150ms padding
+        let margin = Math.floor(hardwareSampleRate * 0.15); 
         let startIdx = 0;
         let endIdx = rawBuffer.length - 1;
         
@@ -462,17 +469,14 @@
             if(Math.abs(rawBuffer[i]) > trimThreshold) { endIdx = Math.min(rawBuffer.length - 1, i + margin); break; }
         }
         
-        if (startIdx >= endIdx) return { base64Audio: "", duration: 0, byteCount: 0, targetRate: 1500 }; // Entirely silent
+        if (startIdx >= endIdx) return { base64Audio: "", duration: 0, byteCount: 0, targetRate: 1500 }; 
         
         rawBuffer = rawBuffer.slice(startIdx, endIdx + 1);
         trimmedDurationSec = rawBuffer.length / hardwareSampleRate;
 
         let targetRate = parseInt(document.getElementById('qualitySelect').value);
         
-        // Pass 1: DSP Enhancements (Pre-emphasis + Filters)
         let enhancedBuffer = processDSP(rawBuffer, hardwareSampleRate, targetRate);
-        
-        // Pass 2: Resampling
         let resampled = resampleAudio(enhancedBuffer, hardwareSampleRate, targetRate);
 
         let pcm16 = new Int16Array(resampled.length);
@@ -580,6 +584,8 @@
     async function generateQRCode() {
         let projName = document.getElementById('projectName').value.trim() || getDefaultProjectName();
         let pwd = document.getElementById('encPassword').value;
+        let logoOpt = document.querySelector('input[name="logoOpt"]:checked').value;
+        
         let payloadData = {
             project: projName, timestamp: new Date().toISOString(), gps: currentLocation.text, type: activeInputMode
         };
@@ -602,9 +608,9 @@
             jsonStr = JSON.stringify({ enc: true, payload: cipher });
             isEncrypted = true;
         }
-
-        // Change Error Correction level if user provided a logo (High allows ~30% obstruction)
-        let qrLevel = customLogo ? 'H' : 'L';
+        
+        // Use high error correction if any logo is selected
+        let qrLevel = (logoOpt !== 'none') ? 'H' : 'L';
 
         qr = new QRious({
             element: document.getElementById('qrCanvas'), 
@@ -613,29 +619,44 @@
             level: qrLevel
         });
 
-        // NEW LOGIC: Overlay the logo if provided
-        if (customLogo) {
-            let canvas = document.getElementById('qrCanvas');
-            let ctx = canvas.getContext('2d');
-            let size = canvas.width;
-            
-            // Logo takes up approx 22% of the space which is safe under Level H
-            let logoSize = size * 0.22; 
-            let offset = (size - logoSize) / 2;
-            
-            // Draw a protective white background square to enhance logo contrast
-            ctx.fillStyle = 'white';
-            let bgMargin = Math.floor(size * 0.02);
-            ctx.fillRect(offset - bgMargin, offset - bgMargin, logoSize + (bgMargin * 2), logoSize + (bgMargin * 2));
-            
-            // Draw the user-selected image
-            ctx.drawImage(customLogo, offset, offset, logoSize, logoSize);
-        }
-
         document.getElementById('qrResultCard').style.display = 'block';
         document.getElementById('payloadStats').innerHTML = 
             `<b>Project Name:</b> ${projName}<br><b>Encrypted:</b> ${isEncrypted ? 'Yes (AES-256)' : 'No'}<br>` +
             `<b>Payload Type:</b> ${activeInputMode.toUpperCase()}<br><b>Total Length:</b> ${jsonStr.length} chars`;
+            
+        // Overlay the logo if requested
+        if (logoOpt !== 'none') {
+            let canvas = document.getElementById('qrCanvas');
+            let ctx = canvas.getContext('2d');
+            let img = new Image();
+            
+            let drawLogo = function() {
+                let logoSize = canvas.width * 0.25; 
+                let x = (canvas.width - logoSize) / 2;
+                let y = (canvas.height - logoSize) / 2;
+                
+                ctx.fillStyle = "white";
+                ctx.fillRect(x - 3, y - 3, logoSize + 6, logoSize + 6);
+                ctx.drawImage(img, x, y, logoSize, logoSize);
+            };
+
+            img.onload = drawLogo;
+
+            if (logoOpt === 'qrlock') {
+                img.src = 'QR_Lock_logo_3.png';
+            } else if (logoOpt === 'custom') {
+                let customFile = document.getElementById('customLogoFile').files[0];
+                if (customFile) {
+                    let reader = new FileReader();
+                    reader.onload = function(e) {
+                        img.src = e.target.result;
+                    };
+                    reader.readAsDataURL(customFile);
+                } else {
+                    alert("Notice: You selected 'Custom Image' but didn't choose a file. Generating QR without a logo.");
+                }
+            }
+        }
     }
 
     // --- QR Scanner ---
