@@ -94,6 +94,12 @@
                 <div id="sizeCounter" class="counter" style="margin-top:10px;">Payload Status: No audio recorded.</div>
             </div>
 
+            <!-- NEW FEATURE: Custom Center Logo -->
+            <div style="margin-top: 15px;">
+                <label for="logoInput">Custom Center Logo (Optional, Image File):</label>
+                <input type="file" id="logoInput" accept="image/*" onchange="handleLogoUpload(event)" style="background: white;">
+            </div>
+
             <button class="btn-success" style="margin-top: 20px;" onclick="generateQRCode()">Generate Offline Encrypted QR Code</button>
         </div>
 
@@ -151,6 +157,7 @@
     let qr = null;
     let hardwareSampleRate = 48000;
     let trimmedDurationSec = 0;
+    let customLogo = null; // New state variable for the custom logo
     
     // Scanner State
     let scanStream = null;
@@ -208,6 +215,19 @@
         btn.classList.add('active');
         document.getElementById('textInputArea').style.display = mode === 'text' ? 'block' : 'none';
         document.getElementById('audioInputArea').style.display = mode === 'audio' ? 'block' : 'none';
+    }
+
+    // NEW FUNCTION: Handle loading the logo file from the input
+    function handleLogoUpload(event) {
+        let file = event.target.files[0];
+        if (!file) { customLogo = null; return; }
+        let reader = new FileReader();
+        reader.onload = function(e) {
+            let img = new Image();
+            img.onload = function() { customLogo = img; };
+            img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
     }
 
     // --- Advanced DSP Audio Processing ---
@@ -583,9 +603,34 @@
             isEncrypted = true;
         }
 
+        // Change Error Correction level if user provided a logo (High allows ~30% obstruction)
+        let qrLevel = customLogo ? 'H' : 'L';
+
         qr = new QRious({
-            element: document.getElementById('qrCanvas'), value: jsonStr, size: 300, level: 'L'
+            element: document.getElementById('qrCanvas'), 
+            value: jsonStr, 
+            size: 300, 
+            level: qrLevel
         });
+
+        // NEW LOGIC: Overlay the logo if provided
+        if (customLogo) {
+            let canvas = document.getElementById('qrCanvas');
+            let ctx = canvas.getContext('2d');
+            let size = canvas.width;
+            
+            // Logo takes up approx 22% of the space which is safe under Level H
+            let logoSize = size * 0.22; 
+            let offset = (size - logoSize) / 2;
+            
+            // Draw a protective white background square to enhance logo contrast
+            ctx.fillStyle = 'white';
+            let bgMargin = Math.floor(size * 0.02);
+            ctx.fillRect(offset - bgMargin, offset - bgMargin, logoSize + (bgMargin * 2), logoSize + (bgMargin * 2));
+            
+            // Draw the user-selected image
+            ctx.drawImage(customLogo, offset, offset, logoSize, logoSize);
+        }
 
         document.getElementById('qrResultCard').style.display = 'block';
         document.getElementById('payloadStats').innerHTML = 
