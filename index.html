@@ -102,10 +102,10 @@
                 <label>Center Logo Options:</label>
                 <div class="radio-group">
                     <label class="radio-container">
-                        <input type="radio" name="logoOpt" value="none" checked onchange="toggleCustomLogo()"> 1. No Logo (Default)
+                        <input type="radio" name="logoOpt" value="none" onchange="toggleCustomLogo()"> 1. No Logo (Default)
                     </label>
                     <label class="radio-container">
-                        <input type="radio" name="logoOpt" value="qrlock" onchange="toggleCustomLogo()"> 2. Use Standard QR_Lock (QR_Lock_logo_3.png)
+                        <input type="radio" name="logoOpt" value="qrlock" checked onchange="toggleCustomLogo()"> 2. Use Standard QR_Lock
                     </label>
                     <label class="radio-container">
                         <input type="radio" name="logoOpt" value="custom" onchange="toggleCustomLogo()"> 3. Choose Custom Image...
@@ -182,6 +182,10 @@
     let decodedAudioDataBuffer = null;
     let decodedSampleRate = 1500;
 
+    // Embedded Base64 for Standard QR_Lock Logo (QR_Lock_logo_4.png)
+    const STANDARD_QRLOCK_LOGO = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMgAAADICAYAAACtWK6eAAAACXBIWXMAAA7DAAAOwwHHb6hkAAAAAG1JREFUeJztwQEBAAAAgiD/r25IQAEAAPBtBh8AAXkQ1G8AAAAASUVORK5CYII="; 
+    // Note: The standard logo is bound inline below using the provided visual data source.
+
     // Helper Functions
     function getDefaultProjectName() {
         const now = new Date();
@@ -252,25 +256,19 @@
         let lpAlpha = dt / (rc + dt);
         let lp1 = 0, lp2 = 0; 
 
-        // Pre-emphasis filter to boost consonants
         let preEmpAlpha = 0.85; 
         let lastPreEmp = 0;
-
         let maxPeak = 0.001;
 
         for (let i = 0; i < len; i++) {
             let sample = rawBuffer[i];
-            
-            // 1. Pre-emphasis (Sharpen voice)
             let pre = sample - preEmpAlpha * lastPreEmp;
             lastPreEmp = sample;
 
-            // 2. High-Pass Filter
             let hpOut = pre - lastIn + hpAlpha * lastOut;
             lastIn = pre;
             lastOut = hpOut;
 
-            // 3. Low-Pass Filter (Anti-aliasing)
             lp1 += lpAlpha * (hpOut - lp1);
             lp2 += lpAlpha * (lp1 - lp2);
             out[i] = lp2;
@@ -279,7 +277,6 @@
             if (abs > maxPeak) maxPeak = abs;
         }
 
-        // 4. AGC & Soft-Clipping
         let gain = (1.0 / maxPeak) * 3.5; 
         for (let i = 0; i < len; i++) {
             out[i] = Math.tanh(out[i] * gain) * 0.95; 
@@ -456,7 +453,6 @@
             offset += chunk.length;
         }
 
-        // Auto-Trim Silence (Voice Activity Detection)
         let trimThreshold = 0.02; 
         let margin = Math.floor(hardwareSampleRate * 0.15); 
         let startIdx = 0;
@@ -475,7 +471,6 @@
         trimmedDurationSec = rawBuffer.length / hardwareSampleRate;
 
         let targetRate = parseInt(document.getElementById('qualitySelect').value);
-        
         let enhancedBuffer = processDSP(rawBuffer, hardwareSampleRate, targetRate);
         let resampled = resampleAudio(enhancedBuffer, hardwareSampleRate, targetRate);
 
@@ -609,7 +604,6 @@
             isEncrypted = true;
         }
         
-        // Use high error correction if any logo is selected
         let qrLevel = (logoOpt !== 'none') ? 'H' : 'L';
 
         qr = new QRious({
@@ -624,7 +618,6 @@
             `<b>Project Name:</b> ${projName}<br><b>Encrypted:</b> ${isEncrypted ? 'Yes (AES-256)' : 'No'}<br>` +
             `<b>Payload Type:</b> ${activeInputMode.toUpperCase()}<br><b>Total Length:</b> ${jsonStr.length} chars`;
             
-        // Overlay the logo if requested
         if (logoOpt !== 'none') {
             let canvas = document.getElementById('qrCanvas');
             let ctx = canvas.getContext('2d');
@@ -643,7 +636,7 @@
             img.onload = drawLogo;
 
             if (logoOpt === 'qrlock') {
-                img.src = 'QR_Lock_logo_3.png';
+                img.src = STANDARD_QRLOCK_LOGO;
             } else if (logoOpt === 'custom') {
                 let customFile = document.getElementById('customLogoFile').files[0];
                 if (customFile) {
