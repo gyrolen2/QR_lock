@@ -102,13 +102,13 @@
                 <label>Center Logo Options:</label>
                 <div class="radio-group">
                     <label class="radio-container">
-                        <input type="radio" name="logoOpt" value="none" onchange="toggleCustomLogo()"> 1. No Logo (Default)
+                        <input type="radio" name="logoOpt" value="none" onchange="toggleCustomLogo()"> 1: No logo
                     </label>
                     <label class="radio-container">
-                        <input type="radio" name="logoOpt" value="qrlock" checked onchange="toggleCustomLogo()"> 2. Use Standard QR_Lock
+                        <input type="radio" name="logoOpt" value="qrlock" checked onchange="toggleCustomLogo()"> 2: Use standard pre-loaded QR_Lock logo
                     </label>
                     <label class="radio-container">
-                        <input type="radio" name="logoOpt" value="custom" onchange="toggleCustomLogo()"> 3. Choose Custom Image...
+                        <input type="radio" name="logoOpt" value="custom" onchange="toggleCustomLogo()"> 3: Upload a custom logo image
                     </label>
                 </div>
                 
@@ -184,7 +184,6 @@
 
     // Embedded Base64 for Standard QR_Lock Logo (QR_Lock_logo_4.png)
     const STANDARD_QRLOCK_LOGO = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMgAAADICAYAAACtWK6eAAAACXBIWXMAAA7DAAAOwwHHb6hkAAAAAG1JREFUeJztwQEBAAAAgiD/r25IQAEAAPBtBh8AAXkQ1G8AAAAASUVORK5CYII="; 
-    // Note: The standard logo is bound inline below using the provided visual data source.
 
     // Helper Functions
     function getDefaultProjectName() {
